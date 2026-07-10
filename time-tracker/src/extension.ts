@@ -1,10 +1,58 @@
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import initSqlJs from "sql.js";
 import * as vscode from "vscode";
 
-export function activate(context: vscode.ExtensionContext) {
+export async function openDatabase(context: vscode.ExtensionContext) {
+  await fs.mkdir(context.globalStorageUri.fsPath, { recursive: true });
+
+  const dbPath = path.join(
+    context.globalStorageUri.fsPath,
+    "time-tracker.sqlite",
+  );
+  const SQL = await initSqlJs();
+  const file = await fs.readFile(dbPath).catch(() => undefined);
+  const db = file ? new SQL.Database(file) : new SQL.Database();
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      duration_seconds INTEGER,
+      repo_path TEXT,
+      repo_name TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS session_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      file_path TEXT NOT NULL,
+      opened_at TEXT,
+      closed_at TEXT,
+      active_seconds INTEGER DEFAULT 0,
+      FOREIGN KEY (session_id) REFERENCES sessions(id)
+    );
+  `);
+
+  return {
+    db,
+    dbPath,
+    async save() {
+      const data = db.export();
+      await fs.writeFile(dbPath, Buffer.from(data));
+    },
+  };
+}
+
+export async function activate(context: vscode.ExtensionContext) {
+  const database = await openDatabase(context);
+
   const statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     100,
   );
+
   // Count time from extension start
   const startTime = new Date();
 
@@ -19,7 +67,7 @@ export function activate(context: vscode.ExtensionContext) {
     const timeText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 
     statusBarItem.text = `Today: ${timeText}`;
-    statusBarItem.tooltip = "Time Tracker";
+    statusBarItem.tooltip = "(Click to view stats (WIP))";
   };
 
   updateStatusBar();
