@@ -1,5 +1,6 @@
 {
   "name": "time-tracker",
+  "publisher": "Juceez",
   "displayName": "Time Tracker",
   "description": "Local time tracker for vscode",
   "version": "0.0.1",

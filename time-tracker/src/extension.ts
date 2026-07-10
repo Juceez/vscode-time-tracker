@@ -35,6 +35,10 @@ export async function openDatabase(context: vscode.ExtensionContext) {
     );
   `);
 
+  // Save immediately to write the .sqlite file to disk
+  const data = db.export();
+  await fs.writeFile(dbPath, Buffer.from(data));
+
   return {
     db,
     dbPath,
