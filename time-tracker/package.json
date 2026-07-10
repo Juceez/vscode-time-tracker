@@ -10,6 +10,14 @@
   "categories": [
     "Other"
   ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "time-tracker.openDatabaseFile",
+        "title": "Time Tracker: Open Database File"
+      }
+    ]
+  },
   "activationEvents": [
     "onStartupFinished"
   ],

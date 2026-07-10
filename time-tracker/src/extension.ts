@@ -50,7 +50,26 @@ export async function openDatabase(context: vscode.ExtensionContext) {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  const database = await openDatabase(context);
+  const { dbPath } = await openDatabase(context);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "time-tracker.openDatabaseFile",
+      async () => {
+        const dbUri = vscode.Uri.file(dbPath);
+
+        // Check if the file exists before trying to open it
+        try {
+          await fs.access(dbPath);
+          await vscode.env.openExternal(dbUri);
+        } catch {
+          vscode.window.showErrorMessage(
+            `Database file not found at ${dbPath}`,
+          );
+        }
+      },
+    ),
+  );
 
   const statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
