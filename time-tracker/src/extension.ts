@@ -63,9 +63,23 @@ export async function activate(context: vscode.ExtensionContext) {
   save = dbObject.save;
   dbPath = dbObject.dbPath;
 
+  // Get repo path and name for the current session
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  let repoPath: string | null = null;
+  let repoName: string | null = null;
+
+  if (workspaceFolders && workspaceFolders.length > 0) {
+    const workspaceFolder = workspaceFolders[0];
+    repoPath = workspaceFolder.uri.fsPath;
+    repoName = path.basename(repoPath);
+  }
+
   // Create a session row on startup
   startedAt = new Date().toISOString();
-  db.run("INSERT INTO sessions (started_at) VALUES (?)", [startedAt]);
+  db.run(
+    "INSERT INTO sessions (started_at, repo_path, repo_name) VALUES (?, ?, ?)",
+    [startedAt, repoPath, repoName],
+  );
   const result = db.exec("SELECT last_insert_rowid()");
   currentSessionId = result[0].values[0][0] as number;
   await save();
