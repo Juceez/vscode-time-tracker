@@ -95,21 +95,39 @@ export async function activate(context: vscode.ExtensionContext) {
     100,
   );
 
+  // Sum today's sessions' minutes
+  const todaySessions = db!.exec(
+    "SELECT COALESCE(SUM(duration_minutes), 0) AS total FROM sessions WHERE date(started_at) = date('now')",
+  );
+  const todayMinutes = todaySessions[0].values[0][0] as number;
+
   // Count time from extension start
   const startTime = new Date();
 
-  // Track time by comparing to when extension first opened
+  // Track time by comparing to when session started and add today's stored minutes
   const updateStatusBar = () => {
     const now = new Date();
-    const totalMinutes = Math.floor(
+    const sessionMinutes = Math.floor(
       (now.getTime() - startTime.getTime()) / 60000,
     );
+    const totalMinutes =
+      Math.floor((now.getTime() - startTime.getTime()) / 60000) + todayMinutes;
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     const timeText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 
     statusBarItem.text = `Today: ${timeText}`;
     statusBarItem.tooltip = "(Click to view stats (WIP))";
+
+    // Write session minutes to db every minute to prevent data loss
+    if (db && currentSessionId) {
+      const endedAt = new Date().toISOString();
+      db.run(
+        "UPDATE sessions SET ended_at = ?, duration_minutes = ? WHERE id = ?",
+        [endedAt, sessionMinutes, currentSessionId],
+      );
+      save!();
+    }
   };
 
   updateStatusBar();
@@ -123,7 +141,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  // Store session end timestamp on extension deactivation
+  // Write session end and minutes to db
   if (db && currentSessionId && startedAt && dbPath) {
     const endedAt = new Date().toISOString();
     db.run(
