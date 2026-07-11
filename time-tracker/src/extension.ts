@@ -1,7 +1,14 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import initSqlJs from "sql.js";
+import initSqlJs, { Database } from "sql.js";
 import * as vscode from "vscode";
+import * as fsSync from "node:fs";
+
+let currentSessionId: number | undefined;
+let db: Database | undefined;
+let save: (() => Promise<void>) | undefined;
+let startedAt: string | undefined;
+let dbPath: string | undefined;
 
 export async function openDatabase(context: vscode.ExtensionContext) {
   await fs.mkdir(context.globalStorageUri.fsPath, { recursive: true });
@@ -12,14 +19,15 @@ export async function openDatabase(context: vscode.ExtensionContext) {
   );
   const SQL = await initSqlJs();
   const file = await fs.readFile(dbPath).catch(() => undefined);
-  const db = file ? new SQL.Database(file) : new SQL.Database();
+  const db =
+    file && file.length > 0 ? new SQL.Database(file) : new SQL.Database();
 
   db.run(`
     CREATE TABLE IF NOT EXISTS sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       started_at TEXT NOT NULL,
       ended_at TEXT,
-      duration_seconds INTEGER,
+      duration_minutes INTEGER,
       repo_path TEXT,
       repo_name TEXT
     );
@@ -50,17 +58,28 @@ export async function openDatabase(context: vscode.ExtensionContext) {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  const { dbPath } = await openDatabase(context);
+  const dbObject = await openDatabase(context);
+  db = dbObject.db;
+  save = dbObject.save;
+  dbPath = dbObject.dbPath;
 
+  // Create a session row on startup
+  startedAt = new Date().toISOString();
+  db.run("INSERT INTO sessions (started_at) VALUES (?)", [startedAt]);
+  const result = db.exec("SELECT last_insert_rowid()");
+  currentSessionId = result[0].values[0][0] as number;
+  await save();
+
+  // Command to open the sqlite file
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "time-tracker.openDatabaseFile",
       async () => {
-        const dbUri = vscode.Uri.file(dbPath);
+        const dbUri = vscode.Uri.file(dbPath!);
 
         // Check if the file exists before trying to open it
         try {
-          await fs.access(dbPath);
+          await fs.access(dbPath!);
           await vscode.env.openExternal(dbUri);
         } catch {
           vscode.window.showErrorMessage(
@@ -103,4 +122,20 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push({ dispose: () => clearInterval(timer) });
 }
 
-export function deactivate() {}
+export function deactivate() {
+  // Store session end timestamp on extension deactivation
+  if (db && currentSessionId && startedAt && dbPath) {
+    const endedAt = new Date().toISOString();
+    db.run(
+      "UPDATE sessions SET ended_at = ?, duration_minutes = ? WHERE id = ?",
+      [
+        endedAt,
+        Math.floor((Date.now() - new Date(startedAt).getTime()) / 60000),
+        currentSessionId,
+      ],
+    );
+    const data = db.export();
+    fsSync.writeFileSync(dbPath, Buffer.from(data));
+    db.close();
+  }
+}
