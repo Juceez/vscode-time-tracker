@@ -9,6 +9,8 @@ let db: Database | undefined;
 let save: (() => Promise<void>) | undefined;
 let startedAt: string | undefined;
 let dbPath: string | undefined;
+let lastSessionFileId: number | undefined;
+let SessionFileStartedAt: Date | undefined;
 
 export async function openDatabase(context: vscode.ExtensionContext) {
   await fs.mkdir(context.globalStorageUri.fsPath, { recursive: true });
@@ -152,11 +154,64 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(statusBarItem);
   context.subscriptions.push({ dispose: () => clearInterval(timer) });
+
+  // Track active file changes
+  const handleActiveEditorChange = (editor: vscode.TextEditor | undefined) => {
+    if (!db || currentSessionId === undefined) return;
+
+    // If had a file open, store the opened duration to the db
+    if (lastSessionFileId && SessionFileStartedAt) {
+      const closedAt = new Date().toISOString();
+      db.run(
+        "UPDATE session_files SET closed_at = ?, active_seconds = ? WHERE id = ?",
+        [
+          closedAt,
+          Math.floor((Date.now() - SessionFileStartedAt.getTime()) / 1000),
+          lastSessionFileId,
+        ],
+      );
+      lastSessionFileId = undefined;
+      SessionFileStartedAt = undefined;
+    }
+
+    // Create a new session file row when opening a new file
+    if (editor?.document.uri.scheme === "file") {
+      const openedAt = new Date().toISOString();
+      db.run(
+        "INSERT INTO session_files (session_id, file_path, opened_at) VALUES (?, ?, ?)",
+        [currentSessionId, editor.document.uri.fsPath, openedAt],
+      );
+      const result = db.exec("SELECT last_insert_rowid()");
+      lastSessionFileId = result[0].values[0][0] as number;
+      SessionFileStartedAt = new Date(openedAt);
+    }
+    save!();
+  };
+
+  // Check current active editor (handles startup case)
+  handleActiveEditorChange(vscode.window.activeTextEditor);
+
+  // Listen for future switches
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(handleActiveEditorChange),
+  );
 }
 
 export function deactivate() {
   // Write session end and minutes to db
   if (db && currentSessionId && startedAt && dbPath) {
+    // Close last open file
+    if (lastSessionFileId && SessionFileStartedAt) {
+      const closedAt = new Date().toISOString();
+      db.run(
+        "UPDATE session_files SET closed_at = ?, active_seconds = ? WHERE id = ?",
+        [
+          closedAt,
+          Math.floor((Date.now() - SessionFileStartedAt.getTime()) / 1000),
+          lastSessionFileId,
+        ],
+      );
+    }
     const endedAt = new Date().toISOString();
     db.run(
       "UPDATE sessions SET ended_at = ?, duration_minutes = ? WHERE id = ?",
